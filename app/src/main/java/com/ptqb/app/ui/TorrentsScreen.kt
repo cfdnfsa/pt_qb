@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -32,6 +33,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -184,11 +186,12 @@ class TorrentsViewModel(app: android.app.Application) : AndroidViewModel(app) {
     fun setLabels(ids: List<Long>, labels: List<String>) = act { it.setLabels(ids, labels) }
 }
 
-/** 下载页：长按进入多选，多选栏做批量操作（添加按钮和服务器切换在 HomePager 右下角） */
+/** 下载页：长按进入多选，多选栏做批量操作（顶栏/排序/刷新在 HomePager） */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadsTab(
     vm: TorrentsViewModel,
+    onOpenAdd: () -> Unit,
     onOpenDetail: (String) -> Unit,
     onOpenServerSheet: () -> Unit,
 ) {
@@ -439,6 +442,11 @@ fun DownloadsTab(
             }
             }
         }
+
+        FloatingActionButton(
+            onClick = onOpenAdd,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+        ) { Icon(Icons.Default.Add, "添加") }
     }
 
     // 批量操作确认（防手滑）

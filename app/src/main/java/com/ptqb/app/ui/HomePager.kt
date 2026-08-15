@@ -67,26 +67,32 @@ fun HomePager(
 
     Box(Modifier.fillMaxSize().statusBarsPadding()) {
         Column(Modifier.fillMaxSize()) {
-            // 下载页头部：速度/剩余 + 排序 刷新（仅下载页显示；服务器切换在右下角按钮）
+            // 下载页头部：服务器（点击切换）+ 速度/剩余 + 排序 刷新（仅下载页显示）
             if (page == 0) {
                 Row(
                     Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
+                        val s = torrentsState.server
                         val st = torrentsState.stats
+                        Text(
+                            (s?.name?.ifBlank { s.host } ?: "未选择服务器") + " ▾",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.clickable { serverSheet = true },
+                        )
                         Row {
                             st?.let {
                                 Text(
                                     "↓${fmtSpeed(it.downloadSpeed)}  ↑${fmtSpeed(it.uploadSpeed)}",
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                             if (torrentsState.freeSpace > 0) {
                                 Text(
                                     "   剩余${fmtSize(torrentsState.freeSpace)}",
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
@@ -127,6 +133,7 @@ fun HomePager(
                     ) {
                         DownloadsTab(
                             vm = torrentsVm,
+                            onOpenAdd = onOpenAdd,
                             onOpenDetail = onOpenDetail,
                             onOpenServerSheet = { serverSheet = true },
                         )
@@ -163,23 +170,6 @@ fun HomePager(
                 .padding(start = 16.dp, bottom = 16.dp)
                 .navigationBarsPadding(),
         ) { Text("${PAGE_TITLES[page]} ▾") }
-
-        // 右下角：添加（下载页）+ 服务器快速切换
-        Column(
-            Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 16.dp, bottom = 16.dp)
-                .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            horizontalAlignment = Alignment.End,
-        ) {
-            if (page == 0) {
-                FloatingActionButton(onClick = onOpenAdd) { Icon(Icons.Default.Add, "添加种子") }
-            }
-            OutlinedButton(onClick = { serverSheet = true }) {
-                Text("${torrentsState.server?.name?.ifBlank { torrentsState.server?.host } ?: "选服务器"} ▾")
-            }
-        }
     }
 
     // 页面切换菜单（底部弹出）
