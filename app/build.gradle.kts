@@ -52,5 +52,6 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.swiperefreshlayout)
     debugImplementation(libs.androidx.ui.tooling)
 }

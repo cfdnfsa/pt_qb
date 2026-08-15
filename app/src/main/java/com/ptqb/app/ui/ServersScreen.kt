@@ -41,8 +41,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ptqb.app.data.Server
 import com.ptqb.app.data.ServerStore
+import com.ptqb.app.data.Site
 import com.ptqb.app.data.Servers
 import com.ptqb.app.data.TrClient
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -133,15 +135,20 @@ class ServersViewModel(app: android.app.Application) : AndroidViewModel(app) {
     }
 }
 
-/** 设置页：服务器管理（后续站点管理等也加在这里） */
+/** 设置页：服务器管理 + 站点管理 + 目录 + 偏好 */
 @Composable
 fun SettingsTab(vm: ServersViewModel) {
     val store by vm.state.collectAsStateWithLifecycle()
+    val sitesVm: SitesViewModel = viewModel()
+    val siteStore by sitesVm.state.collectAsStateWithLifecycle()
     var showAdd by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Server?>(null) }
     var showDirAdd by remember { mutableStateOf(false) }
     var deleteServer by remember { mutableStateOf<Server?>(null) }
     var removeDirPath by remember { mutableStateOf<String?>(null) }
+    var showSiteAdd by remember { mutableStateOf(false) }
+    var editSite by remember { mutableStateOf<Site?>(null) }
+    var deleteSite by remember { mutableStateOf<Site?>(null) }
     val currentServer = store.servers.firstOrNull { it.id == store.currentId }
 
     Box(Modifier.fillMaxSize()) {
@@ -236,14 +243,31 @@ fun SettingsTab(vm: ServersViewModel) {
                     }
                 }
             }
+            // ===== 站点管理 =====
             item {
                 Text(
-                    "站点（v2）",
+                    "站点",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
                 )
-                Text("PT 站搜索与转存，开发中", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (siteStore.sites.isEmpty()) {
+                    Text("没有站点，点下方添加后到 PT 页浏览", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    siteStore.sites.forEach { s ->
+                        SiteRow(site = s, onClick = { editSite = s }, onLongClick = { deleteSite = s })
+                    }
+                }
+                OutlinedButton(
+                    onClick = { showSiteAdd = true },
+                    modifier = Modifier.padding(top = 4.dp),
+                ) { Text("添加站点") }
+                Text(
+                    "点击行编辑，长按删除。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
         }
 
@@ -257,6 +281,27 @@ fun SettingsTab(vm: ServersViewModel) {
 
     if (showAdd) ServerEditDialog(null, { showAdd = false }, vm)
     editing?.let { ServerEditDialog(it, { editing = null }, vm) }
+
+    if (showSiteAdd) SiteEditDialog(null, { showSiteAdd = false }, sitesVm)
+    editSite?.let { SiteEditDialog(it, { editSite = null }, sitesVm) }
+    deleteSite?.let { s ->
+        AlertDialog(
+            onDismissRequest = { deleteSite = null },
+            title = { Text("删除站点？") },
+            text = {
+                Text(
+                    "「${s.name.ifBlank { s.url }}」\n仅删除 App 内的站点记录，Cookie 一并失效，不影响网站账号。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                OutlinedButton(onClick = { sitesVm.delete(s); deleteSite = null }) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { deleteSite = null }) { Text("取消") } },
+        )
+    }
 
     if (showDirAdd) {
         var path by remember { mutableStateOf("") }
@@ -318,6 +363,25 @@ fun SettingsTab(vm: ServersViewModel) {
                 OutlinedButton(onClick = { vm.removeDir(d); removeDirPath = null }) { Text("移除") }
             },
             dismissButton = { TextButton(onClick = { removeDirPath = null }) { Text("取消") } },
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SiteRow(site: Site, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(12.dp),
+    ) {
+        Text(site.name.ifBlank { site.url }, style = MaterialTheme.typography.titleMedium)
+        Text(
+            site.url,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

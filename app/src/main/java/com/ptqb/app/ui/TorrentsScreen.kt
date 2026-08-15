@@ -4,6 +4,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,7 +15,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,7 +23,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -32,7 +32,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -51,6 +50,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -182,12 +184,11 @@ class TorrentsViewModel(app: android.app.Application) : AndroidViewModel(app) {
     fun setLabels(ids: List<Long>, labels: List<String>) = act { it.setLabels(ids, labels) }
 }
 
-/** 下载页：长按进入多选，多选栏做批量操作（顶栏/排序/刷新在 HomePager） */
+/** 下载页：长按进入多选，多选栏做批量操作（添加按钮和服务器切换在 HomePager 右下角） */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadsTab(
     vm: TorrentsViewModel,
-    onOpenAdd: () -> Unit,
     onOpenDetail: (String) -> Unit,
     onOpenServerSheet: () -> Unit,
 ) {
@@ -216,12 +217,40 @@ fun DownloadsTab(
         if (!state.loading) refreshing = false
     }
 
+    val torrents = state.torrents
+    val dirs = remember(torrents) { torrents.map { it.downloadDir }.distinct().sorted() }
+    // 目录序列（首项 = 全部），左右滑动循环切换
+    val dirOptions = remember(dirs) { listOf<String?>(null) + dirs }
+
     Box(Modifier.fillMaxSize()) {
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
             isRefreshing = refreshing,
             onRefresh = { refreshing = true; vm.refresh() },
         ) {
-        Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(dirs) {
+                    val threshold = 60.dp.toPx()
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        var acc = 0f
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull() ?: break
+                            if (!change.pressed) break
+                            acc += change.positionChange().x
+                            if (acc <= -threshold || acc >= threshold) {
+                                val delta = if (acc < 0) 1 else -1
+                                val cur = dirOptions.indexOf(state.dirFilter).let { if (it < 0) 0 else it }
+                                val next = (cur + delta + dirOptions.size) % dirOptions.size
+                                vm.setDirFilter(dirOptions[next])
+                                break
+                            }
+                        }
+                    }
+                }
+        ) {
             state.error?.let {
                 Text(
                     it,
@@ -231,8 +260,6 @@ fun DownloadsTab(
                 )
             }
 
-            val torrents = state.torrents
-            val dirs = remember(torrents) { torrents.map { it.downloadDir }.distinct().sorted() }
             val labels = remember(torrents) { torrents.flatMap { it.labels }.distinct().sorted() }
             val filtered = remember(torrents, state.statusFilter, state.dirFilter, state.labelFilter, state.sort, state.sortAsc, search) {
                 val sf = state.statusFilter
@@ -410,13 +437,8 @@ fun DownloadsTab(
                     }
                 }
             }
+            }
         }
-        }
-
-        FloatingActionButton(
-            onClick = onOpenAdd,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp).navigationBarsPadding(),
-        ) { Icon(Icons.Default.Add, "添加") }
     }
 
     // 批量操作确认（防手滑）

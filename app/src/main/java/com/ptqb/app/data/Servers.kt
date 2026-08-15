@@ -11,7 +11,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-private val Context.dataStore by preferencesDataStore("ptqb")
+val Context.dataStore by preferencesDataStore("ptqb")
 
 @Serializable
 data class Server(

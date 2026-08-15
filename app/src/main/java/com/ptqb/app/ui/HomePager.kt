@@ -1,14 +1,7 @@
 package com.ptqb.app.ui
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,18 +11,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -38,27 +28,23 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.launch
 
 private val PAGE_TITLES = listOf("下载", "PT", "设置")
 
 /**
- * 全屏主界面：横滑三页（下载/PT/设置），顶栏大字标题点击弹切换菜单。
- * 无底部导航栏等常驻控件。
+ * 全屏主界面：无顶部标题栏，页面切换走左下角按钮 + 底部菜单。
+ * 三个页面叠放 zIndex 切换，懒创建、永久保活。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,61 +52,46 @@ fun HomePager(
     onOpenAdd: () -> Unit,
     onOpenDetail: (String) -> Unit,
 ) {
-    val pagerState = rememberPagerState { PAGE_TITLES.size }
-    val scope = rememberCoroutineScope()
+    var page by remember { mutableStateOf(0) }
+    var visited by remember { mutableStateOf(setOf(0)) }
+    LaunchedEffect(page) { visited = visited + page }
+
     val torrentsVm: TorrentsViewModel = viewModel()
     val serversVm: ServersViewModel = viewModel()
     val torrentsState by torrentsVm.state.collectAsStateWithLifecycle()
     val serverStore by serversVm.state.collectAsStateWithLifecycle()
 
-    var menuOpen by remember { mutableStateOf(false) }
+    var menuSheet by remember { mutableStateOf(false) }
     var serverSheet by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
 
-    fun goTo(page: Int) = scope.launch { pagerState.animateScrollToPage(page) }
-
     Box(Modifier.fillMaxSize().statusBarsPadding()) {
         Column(Modifier.fillMaxSize()) {
-            // 顶栏：大字标题（点击弹切换菜单）+ 页指示点 + 当前页操作
-            Row(
-                Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                AnimatedContent(
-                    targetState = pagerState.currentPage,
-                    transitionSpec = {
-                        val forward = targetState >= initialState
-                        val sign = if (forward) 1 else -1
-                        (slideInHorizontally { sign * it / 4 } + fadeIn()) togetherWith
-                            (slideOutHorizontally { -sign * it / 4 } + fadeOut())
-                    },
-                    label = "pageTitle",
-                ) { page ->
-                    Text(
-                        PAGE_TITLES[page],
-                        style = MaterialTheme.typography.displaySmall,
-                        fontWeight = FontWeight.Black,
-                        modifier = Modifier.clip(CircleShape).clickable { menuOpen = true },
-                    )
-                }
+            // 下载页头部：速度/剩余 + 排序 刷新（仅下载页显示；服务器切换在右下角按钮）
+            if (page == 0) {
                 Row(
-                    Modifier.padding(start = 10.dp, bottom = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    repeat(PAGE_TITLES.size) { i ->
-                        Box(
-                            Modifier
-                                .size(5.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (i == pagerState.currentPage) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.outlineVariant
+                    Column(Modifier.weight(1f)) {
+                        val st = torrentsState.stats
+                        Row {
+                            st?.let {
+                                Text(
+                                    "↓${fmtSpeed(it.downloadSpeed)}  ↑${fmtSpeed(it.uploadSpeed)}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                        )
+                            }
+                            if (torrentsState.freeSpace > 0) {
+                                Text(
+                                    "   剩余${fmtSize(torrentsState.freeSpace)}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
-                }
-                Spacer(Modifier.weight(1f))
-                if (pagerState.currentPage == 0) {
                     Box {
                         IconButton(onClick = { sortMenu = true }) { Icon(Icons.Default.MoreVert, "排序") }
                         DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
@@ -136,7 +107,7 @@ fun HomePager(
                                             }
                                         )
                                     },
-                                    onClick = { torrentsVm.setSort(s) },  // 不关菜单，便于切换正反序
+                                    onClick = { torrentsVm.setSort(s) },
                                 )
                             }
                         }
@@ -145,90 +116,92 @@ fun HomePager(
                 }
             }
 
-            // 下载页专属：当前服务器 + 全局速度，点击弹切换抽屉
-            if (pagerState.currentPage == 0) {
-                val s = torrentsState.server
-                val st = torrentsState.stats
-                Row(
-                    Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        (s?.name?.ifBlank { s.host } ?: "未选择服务器") + " ▾",
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.clickable { serverSheet = true },
-                    )
-                    st?.let {
-                        Text(
-                            "   ↓${fmtSpeed(it.downloadSpeed)}  ↑${fmtSpeed(it.uploadSpeed)}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (torrentsState.freeSpace > 0) {
-                        Text(
-                            "   剩余${fmtSize(torrentsState.freeSpace)}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // 三页叠放：zIndex 决定谁显示（每页铺背景色避免下层透出）；懒创建、永久保活
+            Box(Modifier.fillMaxSize()) {
+                if (0 in visited) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .zIndex(if (page == 0) 1f else 0f)
+                            .background(MaterialTheme.colorScheme.background)
+                    ) {
+                        DownloadsTab(
+                            vm = torrentsVm,
+                            onOpenDetail = onOpenDetail,
+                            onOpenServerSheet = { serverSheet = true },
                         )
                     }
                 }
-            }
-
-            HorizontalPager(state = pagerState) { page ->
-                when (page) {
-                    0 -> DownloadsTab(vm = torrentsVm, onOpenAdd = onOpenAdd, onOpenDetail = onOpenDetail, onOpenServerSheet = { serverSheet = true })
-                    1 -> PtPlaceholderTab()
-                    2 -> SettingsTab(vm = serversVm)
+                if (1 in visited) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .zIndex(if (page == 1) 1f else 0f)
+                            .background(MaterialTheme.colorScheme.background)
+                    ) {
+                        PtTab(active = page == 1)
+                    }
+                }
+                if (2 in visited) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .zIndex(if (page == 2) 1f else 0f)
+                            .background(MaterialTheme.colorScheme.background)
+                    ) {
+                        SettingsTab(vm = serversVm)
+                    }
                 }
             }
         }
 
-        // 顶部展开的页面切换菜单
-        if (menuOpen) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.35f))
-                    .pointerInput(Unit) { detectTapGestures { menuOpen = false } }
-            )
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-            ) {
-                PAGE_TITLES.forEachIndexed { i, title ->
-                    val current = i == pagerState.currentPage
-                    val bg = if (current) MaterialTheme.colorScheme.primary else Color.Transparent
-                    val fg = if (current) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                    val sub = if (current) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
-                              else MaterialTheme.colorScheme.onSurfaceVariant
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(bg)
-                            .clickable(enabled = !current) { menuOpen = false; goTo(i) }
-                            .padding(horizontal = 20.dp, vertical = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "%02d".format(i + 1),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = sub,
-                            modifier = Modifier.padding(end = 16.dp),
-                        )
-                        Text(
-                            title,
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = if (current) FontWeight.Black else FontWeight.Normal,
-                            color = fg,
-                        )
-                        Spacer(Modifier.weight(1f))
-                        if (current) Text("当前", style = MaterialTheme.typography.labelMedium, color = sub)
-                    }
-                }
-                HorizontalDivider()
+        // 左下角：页面切换按钮
+        OutlinedButton(
+            onClick = { menuSheet = true },
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 16.dp, bottom = 16.dp)
+                .navigationBarsPadding(),
+        ) { Text("${PAGE_TITLES[page]} ▾") }
+
+        // 右下角：添加（下载页）+ 服务器快速切换
+        Column(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 16.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.End,
+        ) {
+            if (page == 0) {
+                FloatingActionButton(onClick = onOpenAdd) { Icon(Icons.Default.Add, "添加种子") }
             }
+            OutlinedButton(onClick = { serverSheet = true }) {
+                Text("${torrentsState.server?.name?.ifBlank { torrentsState.server?.host } ?: "选服务器"} ▾")
+            }
+        }
+    }
+
+    // 页面切换菜单（底部弹出）
+    if (menuSheet) {
+        ModalBottomSheet(onDismissRequest = { menuSheet = false }) {
+            Text(
+                "页面",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+            )
+            PAGE_TITLES.forEachIndexed { i, title ->
+                val current = i == page
+                ListItem(
+                    headlineContent = { Text("%02d · %s".format(i + 1, title)) },
+                    trailingContent = { if (current) Text("当前") },
+                    modifier = Modifier.clickable {
+                        menuSheet = false
+                        page = i
+                    },
+                )
+            }
+            Spacer(Modifier.navigationBarsPadding().padding(bottom = 12.dp))
         }
     }
 
@@ -253,20 +226,9 @@ fun HomePager(
                 )
             }
             OutlinedButton(
-                onClick = { serverSheet = false; goTo(2) },
+                onClick = { serverSheet = false; page = 2 },
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp).navigationBarsPadding(),
             ) { Text("管理服务器") }
         }
-    }
-}
-
-@Composable
-private fun PtPlaceholderTab() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            "PT 站聚合搜索\nv2 开发中",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
