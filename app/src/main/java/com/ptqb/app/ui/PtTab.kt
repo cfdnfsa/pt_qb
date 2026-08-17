@@ -1,7 +1,6 @@
 package com.ptqb.app.ui
 
 import android.content.Context
-import android.net.Uri
 import android.util.Base64
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -17,11 +16,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -162,7 +158,6 @@ fun PtTab(active: Boolean = true) {
     var session by remember { mutableStateOf<GeckoSession?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
     var pageProgress by remember { mutableStateOf<Int?>(null) }
-    var search by remember { mutableStateOf("") }
 
     // 网页深色跟随系统
     val darkTheme = isSystemInDarkTheme()
@@ -178,13 +173,6 @@ fun PtTab(active: Boolean = true) {
     BackHandler(enabled = active && canGoBack) { session?.goBack() }
 
     val current = store.sites.firstOrNull { it.id == store.lastSiteId } ?: store.sites.firstOrNull()
-
-    fun doSearch() {
-        val q = search.trim()
-        if (q.isNotEmpty()) {
-            current?.let { session?.loadUri("${it.url}/torrents.php?search=${Uri.encode(q)}") }
-        }
-    }
 
     if (store.sites.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -218,18 +206,6 @@ fun PtTab(active: Boolean = true) {
                     Icon(Icons.Default.Refresh, "刷新")
                 }
             }
-
-            // 站内搜索：直达种子列表
-            OutlinedTextField(
-                value = search,
-                onValueChange = { search = it },
-                placeholder = { Text("搜索种子") },
-                singleLine = true,
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { doSearch() }),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
-            )
 
             // 加载进度条
             if (pageProgress != null) {
