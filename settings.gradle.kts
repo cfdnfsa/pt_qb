@@ -17,6 +17,8 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         maven("https://mirrors.cloud.tencent.com/nexus/repository/maven-public/")
+        // GeckoView 仅发布在 Mozilla 自家仓库（central 及其镜像都没有）
+        maven("https://maven.mozilla.org/maven2/")
         google()
         mavenCentral()
     }

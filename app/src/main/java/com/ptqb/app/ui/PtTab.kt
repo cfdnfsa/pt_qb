@@ -1,14 +1,9 @@
 package com.ptqb.app.ui
 
+import android.content.Context
 import android.util.Base64
-import android.webkit.CookieManager
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
-import androidx.core.view.doOnAttach
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,8 +14,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -42,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.doOnAttach
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -50,13 +50,51 @@ import com.ptqb.app.data.Site
 import com.ptqb.app.data.SiteStore
 import com.ptqb.app.data.Sites
 import com.ptqb.app.data.Servers
+import com.ptqb.app.data.TrException
 import com.ptqb.app.data.currentClient
-import com.ptqb.app.data.downloadTorrentFile
 import com.ptqb.app.data.isTorrentLink
-import com.ptqb.app.data.mobileUa
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import org.mozilla.geckoview.AllowOrDeny
+import org.mozilla.geckoview.GeckoResult
+import org.mozilla.geckoview.GeckoRuntime
+import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoSessionSettings
+import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.GeckoWebExecutor
+import org.mozilla.geckoview.WebRequest
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+/** Firefox(Gecko) 引擎单例：真正的浏览器内核，TLS 指纹不会被站点 WAF 拦截 */
+object GeckoHolder {
+    @Volatile
+    private var runtime: GeckoRuntime? = null
+
+    fun get(context: Context): GeckoRuntime =
+        runtime ?: synchronized(this) {
+            runtime ?: GeckoRuntime.create(context.applicationContext).also { runtime = it }
+        }
+}
+
+suspend fun <T : Any> GeckoResult<T>.await(): T = suspendCancellableCoroutine { cont ->
+    then<Unit>(
+        { value -> cont.resume(value as T); null },
+        { err -> cont.resumeWithException(err); null },
+    )
+}
+
+/** 用 Firefox 引擎的网络栈下载种子文件：Cookie/UA/TLS 指纹与浏览器会话完全一致 */
+private suspend fun fetchTorrentBytes(context: Context, url: String): ByteArray {
+    val req = WebRequest.Builder(url)
+        .header("Referer", url)
+        .build()
+    val resp = GeckoWebExecutor(GeckoHolder.get(context)).fetch(req).await()
+    if (resp.statusCode !in 200..299) throw TrException("下载种子文件失败 HTTP ${resp.statusCode}")
+    return resp.body?.use { it.readBytes() } ?: throw TrException("种子文件为空")
+}
 
 class SitesViewModel(app: android.app.Application) : AndroidViewModel(app) {
     val state = MutableStateFlow(SiteStore())
@@ -96,7 +134,7 @@ class SitesViewModel(app: android.app.Application) : AndroidViewModel(app) {
     }
 }
 
-/** PT 页：站点浏览（WebView）+ 下载链接拦截转存；active=当前是否显示（页面常驻时控制返回键归属） */
+/** PT 页：Firefox 引擎站点浏览 + 下载链接拦截转存 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PtTab(active: Boolean = true) {
@@ -107,11 +145,12 @@ fun PtTab(active: Boolean = true) {
     var showSiteAdd by remember { mutableStateOf(false) }
     var editSite by remember { mutableStateOf<Site?>(null) }
     var pendingLink by remember { mutableStateOf<String?>(null) }
-    var webView by remember { mutableStateOf<WebView?>(null) }
+    var session by remember { mutableStateOf<GeckoSession?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
+    var pageProgress by remember { mutableStateOf<Int?>(null) }   // null=空闲
 
     // 返回键：网页有历史则网页后退，否则走系统默认
-    BackHandler(enabled = active && canGoBack) { webView?.goBack() }
+    BackHandler(enabled = active && canGoBack) { session?.goBack() }
 
     val current = store.sites.firstOrNull { it.id == store.lastSiteId } ?: store.sites.firstOrNull()
 
@@ -125,12 +164,12 @@ fun PtTab(active: Boolean = true) {
         }
     } else if (current != null) {
         Column(Modifier.fillMaxSize()) {
-            // 站点栏：网页后退 + 点击弹切换抽屉
+            // 站点栏：网页后退 | 站点切换 | 刷新
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = { webView?.goBack() }, enabled = canGoBack) { Text("←") }
+                TextButton(onClick = { session?.goBack() }, enabled = canGoBack) { Text("←") }
                 TextButton(onClick = { siteSheet = true }) {
                     Text(
                         "${current.name.ifBlank { current.url }} ▾",
@@ -139,22 +178,32 @@ fun PtTab(active: Boolean = true) {
                 }
                 Spacer(Modifier.weight(1f))
                 Text(
-                    "共 ${store.sites.size} 站",
-                    style = MaterialTheme.typography.labelMedium,
+                    "Firefox",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(end = 8.dp),
+                )
+                IconButton(onClick = { session?.reload() }) {
+                    Icon(Icons.Default.Refresh, "刷新")
+                }
+            }
+            // 加载进度条
+            if (pageProgress != null) {
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { (pageProgress ?: 0) / 100f },
+                    modifier = Modifier.fillMaxWidth().height(2.dp),
                 )
             }
             Box(Modifier.fillMaxSize()) {
                 key(current.id) {
-                    PtWebView(
+                    GeckoWebView(
                         startUrl = current.url,
                         onDownloadLink = { pendingLink = it },
-                        onWebViewCreated = {
-                            webView = it
+                        onSessionCreated = {
+                            session = it
                             canGoBack = false
                         },
                         onHistoryChange = { canGoBack = it },
+                        onLoadingChange = { pageProgress = it },
                     )
                 }
             }
@@ -197,72 +246,76 @@ fun PtTab(active: Boolean = true) {
     }
 }
 
-/** 站内 WebView：手机 UA + 缩放 + 下拉刷新 + 登录态持久化 + 拦截下载链接转存 */
+/** Firefox(Gecko) 引擎的站内浏览：手机模式 + 下拉刷新 + 拦截下载链接转存 */
 @Composable
-private fun PtWebView(
+private fun GeckoWebView(
     startUrl: String,
     onDownloadLink: (String) -> Unit,
-    onWebViewCreated: (WebView) -> Unit,
+    onSessionCreated: (GeckoSession) -> Unit,
     onHistoryChange: (Boolean) -> Unit,
+    onLoadingChange: (Int?) -> Unit,
 ) {
     val context = LocalContext.current
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
-            val web = WebView(ctx).apply {
-                CookieManager.getInstance().setAcceptCookie(true)
-                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.userAgentString = mobileUa(context)
-                // 双指缩放
-                settings.setSupportZoom(true)
-                settings.builtInZoomControls = true
-                settings.displayZoomControls = false
-                settings.useWideViewPort = true
-                settings.loadWithOverviewMode = true
-                webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                        val url = request.url.toString()
-                        return if (isTorrentLink(url)) {
-                            onDownloadLink(url)
-                            true
-                        } else {
-                            false
-                        }
-                    }
-
-                    // 导航历史变化时同步 canGoBack
-                    override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
-                        onHistoryChange(view.canGoBack())
-                    }
-
-                    override fun onPageFinished(view: WebView, url: String?) {
-                        (view.parent as? androidx.swiperefreshlayout.widget.SwipeRefreshLayout)
-                            ?.isRefreshing = false
-                        // 只放开站点的缩放限制，不强制 initial-scale，
-                        // 让 overview 模式自动把页面缩到整页可见（默认最小）
-                        view.evaluateJavascript(
-                            "(function(){var m=document.querySelector('meta[name=viewport]');" +
-                                "if(m){var c=m.getAttribute('content')||'';" +
-                                "c=c.replace(/user-scalable\\s*=\\s*no/gi,'user-scalable=yes')" +
-                                ".replace(/maximum-scale\\s*=\\s*[\\d.]+/gi,'maximum-scale=10');" +
-                                "if(!/user-scalable/i.test(c))c+=',user-scalable=yes';" +
-                                "if(!/maximum-scale/i.test(c))c+=',maximum-scale=10';" +
-                                "m.setAttribute('content',c)}else{var n=document.createElement('meta');" +
-                                "n.name='viewport';n.content='width=980, user-scalable=yes, maximum-scale=10';" +
-                                "document.head.appendChild(n)}})()", null)
+            val gecko = GeckoView(ctx)
+            val session = GeckoSession(
+                GeckoSessionSettings.Builder()
+                    .userAgentMode(GeckoSessionSettings.USER_AGENT_MODE_MOBILE)
+                    .viewportMode(GeckoSessionSettings.VIEWPORT_MODE_MOBILE)
+                    .build()
+            )
+            session.navigationDelegate = object : GeckoSession.NavigationDelegate {
+                override fun onLoadRequest(
+                    s: GeckoSession,
+                    request: GeckoSession.NavigationDelegate.LoadRequest,
+                ): GeckoResult<AllowOrDeny>? {
+                    return if (isTorrentLink(request.uri)) {
+                        onDownloadLink(request.uri)
+                        GeckoResult.fromValue(AllowOrDeny.DENY)
+                    } else {
+                        GeckoResult.fromValue(AllowOrDeny.ALLOW)
                     }
                 }
-                // 等 attach 到窗口后再首次加载，避免 factory 阶段加载导致白屏
-                doOnAttach { (it as WebView).loadUrl(startUrl) }
+
+                override fun onCanGoBack(s: GeckoSession, canGoBack: Boolean) {
+                    onHistoryChange(canGoBack)
+                }
+
+                /** target=_blank 等新窗口链接：单窗口应用，改为当前页打开 */
+                override fun onNewSession(s: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
+                    if (isTorrentLink(uri)) {
+                        onDownloadLink(uri)
+                    } else {
+                        s.loadUri(uri)
+                    }
+                    return GeckoResult()
+                }
             }
-            onWebViewCreated(web)
-            androidx.swiperefreshlayout.widget.SwipeRefreshLayout(ctx).apply {
-                addView(web)
-                setOnRefreshListener { web.reload() }
+            session.progressDelegate = object : GeckoSession.ProgressDelegate {
+                override fun onPageStart(s: GeckoSession, url: String) {
+                    onLoadingChange(0)
+                }
+
+                override fun onProgressChange(s: GeckoSession, progress: Int) {
+                    onLoadingChange(progress)
+                }
+
+                override fun onPageStop(s: GeckoSession, success: Boolean) {
+                    onLoadingChange(null)
+                }
             }
+            session.open(GeckoHolder.get(context))
+            onSessionCreated(session)
+            // 必须 attach 到窗口后才能 setSession，否则 Gecko 渲染无处投递（白屏）
+            gecko.doOnAttach {
+                (it as GeckoView).setSession(session)
+                session.loadUri(startUrl)
+            }
+            gecko
         },
+        onRelease = { it.session?.close() },
     )
 }
 
@@ -312,16 +365,14 @@ private fun DownloadToTrDialog(link: String, onDismiss: () -> Unit) {
             OutlinedButton(
                 onClick = {
                     busy = true; msg = null
-                    // 主线程取 Cookie 和 UA（与 WebView 一致，站点校验才通过）
-                    val cookie = CookieManager.getInstance().getCookie(link)
-                    val ua = mobileUa(context)
                     scope.launch {
                         try {
                             val client = currentClient(context)
                             if (link.startsWith("magnet:", true)) {
                                 client.add(filename = link, downloadDir = dir)
                             } else {
-                                val bytes = downloadTorrentFile(link, cookie, referer = link, ua = ua)
+                                // Firefox 引擎网络栈下载（Cookie/UA/指纹全一致）
+                                val bytes = fetchTorrentBytes(context, link)
                                 client.add(
                                     metainfo = Base64.encodeToString(bytes, Base64.NO_WRAP),
                                     downloadDir = dir,
@@ -358,7 +409,7 @@ fun SiteEditDialog(initial: Site?, onDismiss: () -> Unit, vm: SitesViewModel) {
                 OutlinedTextField(name, { name = it }, label = { Text("名称") }, singleLine = true)
                 OutlinedTextField(url, { url = it }, label = { Text("地址 https://xxx.org") }, singleLine = true)
                 Text(
-                    "登录在 PT 页的网页里进行，账号由站点 Cookie 记住。",
+                    "登录在 PT 页的网页里进行，账号由浏览器内核记住。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

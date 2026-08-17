@@ -64,6 +64,7 @@ fun HomePager(
     var menuSheet by remember { mutableStateOf(false) }
     var serverSheet by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
+    var detailHash by remember { mutableStateOf<String?>(null) }
 
     Box(Modifier.fillMaxSize().statusBarsPadding()) {
         Column(Modifier.fillMaxSize()) {
@@ -134,7 +135,7 @@ fun HomePager(
                         DownloadsTab(
                             vm = torrentsVm,
                             onOpenAdd = onOpenAdd,
-                            onOpenDetail = onOpenDetail,
+                            onOpenDetail = { detailHash = it },
                             onOpenServerSheet = { serverSheet = true },
                         )
                     }
@@ -170,6 +171,18 @@ fun HomePager(
                 .padding(start = 16.dp, bottom = 16.dp)
                 .navigationBarsPadding(),
         ) { Text("${PAGE_TITLES[page]} ▾") }
+
+        // 种子详情：全屏覆盖层（不走 NavHost）
+        detailHash?.let { hash ->
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .zIndex(10f)
+                    .background(MaterialTheme.colorScheme.background)
+            ) {
+                TorrentDetailScreen(hash = hash, onBack = { detailHash = null })
+            }
+        }
     }
 
     // 页面切换菜单（底部弹出）

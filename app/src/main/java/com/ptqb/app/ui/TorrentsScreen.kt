@@ -216,6 +216,10 @@ fun DownloadsTab(
         selecting = false
         selectedIds = emptySet()
     }
+    // 勾选清零时自动退出多选模式（避免"困在"多选里，单击恢复进详情）
+    LaunchedEffect(selectedIds) {
+        if (selectedIds.isEmpty()) selecting = false
+    }
     LaunchedEffect(state.loading) {
         if (!state.loading) refreshing = false
     }
@@ -231,28 +235,7 @@ fun DownloadsTab(
             onRefresh = { refreshing = true; vm.refresh() },
         ) {
         Column(
-            Modifier
-                .fillMaxSize()
-                .pointerInput(dirs) {
-                    val threshold = 60.dp.toPx()
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        var acc = 0f
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val change = event.changes.firstOrNull() ?: break
-                            if (!change.pressed) break
-                            acc += change.positionChange().x
-                            if (acc <= -threshold || acc >= threshold) {
-                                val delta = if (acc < 0) 1 else -1
-                                val cur = dirOptions.indexOf(state.dirFilter).let { if (it < 0) 0 else it }
-                                val next = (cur + delta + dirOptions.size) % dirOptions.size
-                                vm.setDirFilter(dirOptions[next])
-                                break
-                            }
-                        }
-                    }
-                }
+            Modifier.fillMaxSize()
         ) {
             state.error?.let {
                 Text(
@@ -415,10 +398,36 @@ fun DownloadsTab(
                 }
 
                 else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize().pointerInput(dirs) {
+                        val threshold = 60.dp.toPx()
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            var accX = 0f
+                            var accY = 0f
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull() ?: break
+                                if (!change.pressed) break
+                                val delta = change.positionChange()
+                                accX += delta.x
+                                accY += delta.y
+                                // 纵向占主导 = 在滚动列表，放弃本次横滑判定
+                                if (kotlin.math.abs(accY) > kotlin.math.abs(accX) + viewConfiguration.touchSlop) break
+                                if (kotlin.math.abs(accX) >= threshold) {
+                                    val step = if (accX < 0) 1 else -1
+                                    val cur = dirOptions.indexOf(state.dirFilter).let { if (it < 0) 0 else it }
+                                    val next = (cur + step + dirOptions.size) % dirOptions.size
+                                    vm.setDirFilter(dirOptions[next])
+                                    break
+                                }
+                            }
+                        }
+                    },
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 120.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(filtered, key = { it.hash }) { t ->
+                    // key 用服务端唯一的 id（hash 在元数据获取中为空，多个空 hash 会撞 key 导致列表异常）
+                    items(filtered, key = { it.id }) { t ->
                         TorrentItem(
                             t = t,
                             selected = t.id in selectedIds,

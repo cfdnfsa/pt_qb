@@ -18,12 +18,9 @@ fun AppNav() {
         composable<HomeRoute> {
             HomePager(
                 onOpenAdd = { nav.navigate(AddTorrentRoute) },
-                onOpenDetail = { nav.navigate(DetailRoute(it)) },
+                onOpenDetail = { /* 详情已改为 HomePager 内全屏覆盖层 */ },
             )
         }
         composable<AddTorrentRoute> { AddTorrentScreen(onBack = { nav.popBackStack() }) }
-        composable<DetailRoute> { entry ->
-            TorrentDetailScreen(hash = entry.toRoute<DetailRoute>().hash, onBack = { nav.popBackStack() })
-        }
     }
 }

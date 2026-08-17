@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.ptqb.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.ptqb.app"
@@ -38,6 +38,15 @@ kotlin {
     }
 }
 
+// GeckoView 传递依赖的 androidx.core 1.18 要求 AGP 8.9.1+，
+// 本机 AGP 8.7.3 + 旧版 AS，钉回 1.15 绕开（若 PT 页运行异常再升 AGP）
+configurations.all {
+    resolutionStrategy {
+        force("androidx.core:core-ktx:1.15.0")
+        force("androidx.core:core:1.15.0")
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -52,6 +61,6 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.swiperefreshlayout)
+    implementation(libs.geckoview)
     debugImplementation(libs.androidx.ui.tooling)
 }
