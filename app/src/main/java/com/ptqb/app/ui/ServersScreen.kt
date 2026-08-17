@@ -141,6 +141,8 @@ fun SettingsTab(vm: ServersViewModel) {
     val store by vm.state.collectAsStateWithLifecycle()
     val sitesVm: SitesViewModel = viewModel()
     val siteStore by sitesVm.state.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     var showAdd by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Server?>(null) }
     var showDirAdd by remember { mutableStateOf(false) }
@@ -149,6 +151,7 @@ fun SettingsTab(vm: ServersViewModel) {
     var showSiteAdd by remember { mutableStateOf(false) }
     var editSite by remember { mutableStateOf<Site?>(null) }
     var deleteSite by remember { mutableStateOf<Site?>(null) }
+    var showClearCache by remember { mutableStateOf(false) }
     val currentServer = store.servers.firstOrNull { it.id == store.currentId }
 
     Box(Modifier.fillMaxSize()) {
@@ -242,6 +245,16 @@ fun SettingsTab(vm: ServersViewModel) {
                         )
                     }
                 }
+                OutlinedButton(
+                    onClick = { showClearCache = true },
+                    modifier = Modifier.padding(top = 8.dp),
+                ) { Text("清理缓存（保留登录）") }
+                Text(
+                    "清理浏览器网络缓存和 App 临时文件。站点登录状态（Cookie）保留，无需重新登录。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
             // ===== 站点管理 =====
             item {
@@ -325,6 +338,38 @@ fun SettingsTab(vm: ServersViewModel) {
                 ) { Text("保存") }
             },
             dismissButton = { TextButton(onClick = { showDirAdd = false }) { Text("取消") } },
+        )
+    }
+
+    // 清理缓存确认（只清网络缓存，保留 Cookie/登录态）
+    if (showClearCache) {
+        AlertDialog(
+            onDismissRequest = { showClearCache = false },
+            title = { Text("清理缓存？") },
+            text = {
+                Text(
+                    "清理浏览器网络缓存与 App 临时文件。\n站点登录状态保留，不用重新登录。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                OutlinedButton(onClick = {
+                    showClearCache = false
+                    scope.launch {
+                        try {
+                            runCatching {
+                                GeckoHolder.get(context).storageController
+                                    .clearData(org.mozilla.geckoview.StorageController.ClearFlags.ALL_CACHES)
+                            }
+                            context.cacheDir.deleteRecursively()
+                            android.widget.Toast.makeText(context, "清理完成，登录状态已保留", android.widget.Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) {
+                            android.widget.Toast.makeText(context, "清理失败：${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }) { Text("清理") }
+            },
+            dismissButton = { TextButton(onClick = { showClearCache = false }) { Text("取消") } },
         )
     }
 

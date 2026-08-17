@@ -97,6 +97,11 @@ fun HomePager(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
+                            Text(
+                                "   累计↑${fmtSize(st?.cumulative?.uploadedBytes ?: 0)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                     Box {

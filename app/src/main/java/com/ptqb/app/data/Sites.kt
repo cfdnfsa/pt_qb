@@ -18,8 +18,11 @@ import okhttp3.Request
 data class Site(
     val id: Long = System.currentTimeMillis(),
     val name: String = "",
-    val url: String = "",       // 站点根地址 https://xxx.org
-)
+    val url: String = "",                      // 站点根地址 https://xxx.org
+    val entryPath: String = "",                // 入口路径（如 /torrents.php，空=首页）
+) {
+    val startUrl: String get() = url + entryPath
+}
 
 @Serializable
 data class SiteStore(

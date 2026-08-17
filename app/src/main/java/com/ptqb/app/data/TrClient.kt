@@ -120,6 +120,25 @@ class TrClient(
         })
     }
 
+    /** 单种子限速（KB/s，null = 不限） */
+    suspend fun setSpeedLimit(ids: List<Long>, downloadKb: Long?, uploadKb: Long?) {
+        raw("torrent-set", buildJsonObject {
+            put("ids", JsonArray(ids.map { JsonPrimitive(it) }))
+            downloadKb?.let {
+                put("downloadLimited", true)
+                put("downloadLimit", it)
+            } ?: run {
+                put("downloadLimited", false)
+            }
+            uploadKb?.let {
+                put("uploadLimited", true)
+                put("uploadLimit", it)
+            } ?: run {
+                put("uploadLimited", false)
+            }
+        })
+    }
+
     suspend fun remove(ids: List<Long>, deleteData: Boolean) {
         raw("torrent-remove", buildJsonObject {
             put("ids", JsonArray(ids.map { JsonPrimitive(it) }))
@@ -146,6 +165,7 @@ class TrClient(
         private val FULL_FIELDS = LIST_FIELDS + listOf(
             "magnetLink", "files", "peers", "peersGettingToUs", "peersSendingToUs",
             "downloadedEver", "secondsDownloading", "activityDate",
+            "downloadLimited", "downloadLimit", "uploadLimited", "uploadLimit",
         )
     }
 }

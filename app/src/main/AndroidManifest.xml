@@ -5,6 +5,8 @@
 
     <application
         android:label="PT管理"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:usesCleartextTraffic="true"
         android:allowBackup="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">

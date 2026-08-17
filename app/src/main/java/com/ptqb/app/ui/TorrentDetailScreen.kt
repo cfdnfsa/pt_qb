@@ -27,6 +27,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -65,6 +66,7 @@ fun TorrentDetailScreen(hash: String, onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var showDelete by remember { mutableStateOf(false) }
+    var showSpeedLimit by remember { mutableStateOf(false) }
     var pendingTitle by remember { mutableStateOf("") }
     var pendingExec by remember { mutableStateOf<(() -> Unit)?>(null) }
 
@@ -256,6 +258,7 @@ fun TorrentDetailScreen(hash: String, onBack: () -> Unit) {
                             OutlinedButton(onClick = { confirm("开始这个种子？") { act { it.start(listOf(torrent.id)) } } }) { Text("开始") }
                             OutlinedButton(onClick = { confirm("暂停这个种子？") { act { it.stop(listOf(torrent.id)) } } }) { Text("暂停") }
                             OutlinedButton(onClick = { confirm("强制开始（跳过排队）？") { act { it.startNow(listOf(torrent.id)) } } }) { Text("强制开始") }
+                            OutlinedButton(onClick = { showSpeedLimit = true }) { Text("限速") }
                         }
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -270,6 +273,47 @@ fun TorrentDetailScreen(hash: String, onBack: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+
+    // 单种子限速
+    if (showSpeedLimit) {
+        t?.let { torrent ->
+            var down by remember(torrent.id) {
+                mutableStateOf(if (torrent.downloadLimited) torrent.downloadLimit.toString() else "")
+            }
+            var up by remember(torrent.id) {
+                mutableStateOf(if (torrent.uploadLimited) torrent.uploadLimit.toString() else "")
+            }
+            AlertDialog(
+                onDismissRequest = { showSpeedLimit = false },
+                title = { Text("限速（KB/s）") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(down, { down = it.filter { c -> c.isDigit() } }, label = { Text("下载限速（空=不限）") }, singleLine = true)
+                        OutlinedTextField(up, { up = it.filter { c -> c.isDigit() } }, label = { Text("上传限速（空=不限）") }, singleLine = true)
+                        Text(
+                            "当前：下载${if (torrent.downloadLimited) "${torrent.downloadLimit}KB/s" else "不限"}，" +
+                                "上传${if (torrent.uploadLimited) "${torrent.uploadLimit}KB/s" else "不限"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                confirmButton = {
+                    OutlinedButton(onClick = {
+                        act {
+                            it.setSpeedLimit(
+                                listOf(torrent.id),
+                                downloadKb = down.trim().toLongOrNull(),
+                                uploadKb = up.trim().toLongOrNull(),
+                            )
+                        }
+                        showSpeedLimit = false
+                    }) { Text("应用") }
+                },
+                dismissButton = { TextButton(onClick = { showSpeedLimit = false }) { Text("取消") } },
+            )
         }
     }
 

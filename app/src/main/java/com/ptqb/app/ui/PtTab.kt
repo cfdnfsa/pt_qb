@@ -1,7 +1,9 @@
 package com.ptqb.app.ui
 
 import android.content.Context
+import android.net.Uri
 import android.util.Base64
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,12 +16,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -37,7 +43,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -134,12 +143,14 @@ class SitesViewModel(app: android.app.Application) : AndroidViewModel(app) {
     }
 }
 
-/** PT 页：Firefox 引擎站点浏览 + 下载链接拦截转存 */
+/** PT 页：Firefox 引擎站点浏览 + 搜索 + 下载链接拦截转存；每站点会话缓存（切站不丢页面） */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PtTab(active: Boolean = true) {
     val vm: SitesViewModel = viewModel()
     val store by vm.state.collectAsStateWithLifecycle()
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
 
     var siteSheet by remember { mutableStateOf(false) }
     var showSiteAdd by remember { mutableStateOf(false) }
@@ -147,12 +158,23 @@ fun PtTab(active: Boolean = true) {
     var pendingLink by remember { mutableStateOf<String?>(null) }
     var session by remember { mutableStateOf<GeckoSession?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
-    var pageProgress by remember { mutableStateOf<Int?>(null) }   // null=空闲
+    var pageProgress by remember { mutableStateOf<Int?>(null) }
+    var search by remember { mutableStateOf("") }
+
+    // 每个站点一个 GeckoSession，切站点回来原地继续
+    val sessions = remember { mutableMapOf<Long, GeckoSession>() }
 
     // 返回键：网页有历史则网页后退，否则走系统默认
     BackHandler(enabled = active && canGoBack) { session?.goBack() }
 
     val current = store.sites.firstOrNull { it.id == store.lastSiteId } ?: store.sites.firstOrNull()
+
+    fun doSearch() {
+        val q = search.trim()
+        if (q.isNotEmpty()) {
+            current?.let { session?.loadUri("${it.url}/torrents.php?search=${Uri.encode(q)}") }
+        }
+    }
 
     if (store.sites.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -186,17 +208,33 @@ fun PtTab(active: Boolean = true) {
                     Icon(Icons.Default.Refresh, "刷新")
                 }
             }
+
+            // 站内搜索：直达种子列表
+            OutlinedTextField(
+                value = search,
+                onValueChange = { search = it },
+                placeholder = { Text("搜索种子") },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Default.Search, null) },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { doSearch() }),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+            )
+
             // 加载进度条
             if (pageProgress != null) {
-                androidx.compose.material3.LinearProgressIndicator(
+                LinearProgressIndicator(
                     progress = { (pageProgress ?: 0) / 100f },
                     modifier = Modifier.fillMaxWidth().height(2.dp),
                 )
             }
+
             Box(Modifier.fillMaxSize()) {
                 key(current.id) {
                     GeckoWebView(
-                        startUrl = current.url,
+                        siteId = current.id,
+                        startUrl = current.startUrl,
+                        sessions = sessions,
                         onDownloadLink = { pendingLink = it },
                         onSessionCreated = {
                             session = it
@@ -246,10 +284,12 @@ fun PtTab(active: Boolean = true) {
     }
 }
 
-/** Firefox(Gecko) 引擎的站内浏览：手机模式 + 下拉刷新 + 拦截下载链接转存 */
+/** Firefox(Gecko) 引擎的站内浏览：会话按站点缓存复用，页面永不重载 */
 @Composable
 private fun GeckoWebView(
+    siteId: Long,
     startUrl: String,
+    sessions: MutableMap<Long, GeckoSession>,
     onDownloadLink: (String) -> Unit,
     onSessionCreated: (GeckoSession) -> Unit,
     onHistoryChange: (Boolean) -> Unit,
@@ -260,12 +300,16 @@ private fun GeckoWebView(
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
             val gecko = GeckoView(ctx)
-            val session = GeckoSession(
+            val existing = sessions[siteId]
+            val created = existing == null
+            val session = existing ?: GeckoSession(
                 GeckoSessionSettings.Builder()
                     .userAgentMode(GeckoSessionSettings.USER_AGENT_MODE_MOBILE)
                     .viewportMode(GeckoSessionSettings.VIEWPORT_MODE_MOBILE)
                     .build()
-            )
+            ).also { sessions[siteId] = it }
+
+            // delegates 每次绑定（复用会话时刷新闭包引用）
             session.navigationDelegate = object : GeckoSession.NavigationDelegate {
                 override fun onLoadRequest(
                     s: GeckoSession,
@@ -306,16 +350,18 @@ private fun GeckoWebView(
                     onLoadingChange(null)
                 }
             }
-            session.open(GeckoHolder.get(context))
+
+            if (created) {
+                session.open(GeckoHolder.get(context))
+            }
             onSessionCreated(session)
             // 必须 attach 到窗口后才能 setSession，否则 Gecko 渲染无处投递（白屏）
             gecko.doOnAttach {
                 (it as GeckoView).setSession(session)
-                session.loadUri(startUrl)
+                if (created) session.loadUri(startUrl)
             }
             gecko
         },
-        onRelease = { it.session?.close() },
     )
 }
 
@@ -401,6 +447,7 @@ private fun DownloadToTrDialog(link: String, onDismiss: () -> Unit) {
 fun SiteEditDialog(initial: Site?, onDismiss: () -> Unit, vm: SitesViewModel) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var url by remember { mutableStateOf(initial?.url ?: "https://") }
+    var entryPath by remember { mutableStateOf(initial?.entryPath ?: "") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "添加站点" else "编辑站点") },
@@ -408,8 +455,14 @@ fun SiteEditDialog(initial: Site?, onDismiss: () -> Unit, vm: SitesViewModel) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { name = it }, label = { Text("名称") }, singleLine = true)
                 OutlinedTextField(url, { url = it }, label = { Text("地址 https://xxx.org") }, singleLine = true)
+                OutlinedTextField(
+                    entryPath,
+                    { entryPath = it },
+                    label = { Text("入口路径（可选，如 /torrents.php）") },
+                    singleLine = true,
+                )
                 Text(
-                    "登录在 PT 页的网页里进行，账号由浏览器内核记住。",
+                    "入口路径：打开站点直接进入的页面，留空为首页。\n登录在网页里进行，账号由浏览器内核记住。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -421,6 +474,7 @@ fun SiteEditDialog(initial: Site?, onDismiss: () -> Unit, vm: SitesViewModel) {
                     val s = (initial ?: Site()).copy(
                         name = name.trim().ifBlank { url.trim() },
                         url = url.trim().trimEnd('/'),
+                        entryPath = entryPath.trim().takeIf { it.startsWith("/") } ?: "",
                     )
                     vm.upsert(s)
                     onDismiss()

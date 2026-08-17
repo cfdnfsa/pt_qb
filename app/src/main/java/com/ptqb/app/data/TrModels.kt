@@ -47,6 +47,10 @@ data class TrTorrent(
     val peers: List<TrPeer> = emptyList(),
     @SerialName("peersGettingToUs") val peersGetting: Int = 0,
     @SerialName("peersSendingToUs") val peersSending: Int = 0,
+    @SerialName("downloadLimited") val downloadLimited: Boolean = false,
+    @SerialName("downloadLimit") val downloadLimit: Long = 0,        // KB/s
+    @SerialName("uploadLimited") val uploadLimited: Boolean = false,
+    @SerialName("uploadLimit") val uploadLimit: Long = 0,            // KB/s
 )
 
 @Serializable
@@ -74,12 +78,20 @@ data class TrFile(
 )
 
 @Serializable
+data class TrCumulativeStats(
+    @SerialName("downloadedBytes") val downloadedBytes: Long = 0,
+    @SerialName("uploadedBytes") val uploadedBytes: Long = 0,
+    @SerialName("secondsActive") val secondsActive: Long = 0,
+)
+
+@Serializable
 data class TrStats(
     @SerialName("downloadSpeed") val downloadSpeed: Long = 0,
     @SerialName("uploadSpeed") val uploadSpeed: Long = 0,
     @SerialName("torrentCount") val torrentCount: Int = 0,
     @SerialName("activeTorrentCount") val activeTorrentCount: Int = 0,
     @SerialName("pausedTorrentCount") val pausedTorrentCount: Int = 0,
+    @SerialName("cumulative-stats") val cumulative: TrCumulativeStats = TrCumulativeStats(),
 )
 
 @Serializable
