@@ -1,6 +1,6 @@
 # pt_qb
 
-个人自用的 Transmission 管理安卓 App（后期加 PT 站聚合搜索 + 一键转存）。
+个人自用的安卓 App：Transmission 管理 + PT 站内嵌浏览器（Firefox 内核）一键转存。
 
 ## 开发原则
 
@@ -10,46 +10,43 @@
 - ViewModel 直接暴露 `val state = MutableStateFlow(State())`，**不用** `_xxx` 私有变量 + `asStateFlow()` 转换那套
 - 无 DI 框架、无 Repository 接口层、无 use-case 层
 
-## 功能规划
+## 功能
 
-### v1（当前）：Transmission 管理
+### 下载管理（Transmission RPC）
 
-- 服务器列表（名称 / ip:端口），点按钮切换当前服务器，每次只操作一个
-- 种子列表：**状态筛选**（全部/下载中/做种中/已停止/校验中/错误）+ **数据目录筛选**（动态生成）
-- 10 秒轮询刷新，顶栏全局上传/下载速度
-- 种子操作：暂停、恢复、强制开始、删除（可选删数据）
-- 添加种子：磁力 / URL / 本地 .torrent 文件
-- 详情：属性、Tracker、文件列表、复制磁力链
+- 多服务器配置切换（每次操作单服务器）；顶栏速度 / 磁盘剩余 / 累计上传
+- 种子列表：状态（功能色）/大小/进度/速度/种|活/分享率/做种时长；10s 轮询（可调/可关）+ 手动刷新 + 下拉刷新
+- 筛选：状态 / 数据目录 / 标签 / 名称搜索；列表左右滑切目录
+- 排序：8 维度（含上传量）正反序
+- 多选批量：暂停/恢复/校验/汇报/改 Tracker/换目录/打标签/删除，全部带确认
+- 详情：常规/快/用户/Tracker/文件（折叠）五分区 + 单种子限速
+- 添加：磁力 / URL / 本地 .torrent，目录选择器（收藏 + 现有目录）
+- 目录收藏管理（新建=记路径，Transmission 添加种子时自动建目录）
 
-### v2（以后）：PT 站
+### PT 浏览（v2，GeckoView = 真正的 Firefox 内核）
 
-- NexusPHP 站点聚合搜索
-- 搜索结果一键推送下载（带 Cookie 转存种子文件）
+- 站点管理/切换/入口路径；登录态持久化（Cookie 由引擎保管）
+- TLS 指纹 = Firefox，站点 WAF 无法拦截（WebView 会被 net::ERR_CONNECTION_CLOSED）
+- 站内搜索直达种子列表；每站点会话缓存（切站不丢页面）；网页返回键后退
+- **下载链接一键转存**：拦截 magnet/​.torrent/download.php（含 target=_blank），用引擎网络栈（Cookie/UA/指纹一致）下载种子 → torrent-add 到当前服务器 + 选目录
+- 设置里可清缓存（保留登录）
 
 ## 技术栈
 
-- Kotlin 2.1 + Jetpack Compose + Material3（黑白描边 monochrome 主题）
-- 单 Activity + Navigation Compose 类型安全路由
-- 纯 OkHttp + kotlinx.serialization（单端点 RPC，一个 `call(method, args)` 泛型函数）
-- DataStore 存服务器配置（JSON）
-- 单模块 :app，minSdk 26 / targetSdk 35
-
-## Transmission RPC 对接要点
-
-- 端点：`POST http://host:port/transmission/rpc`
-- 认证：HTTP Basic Auth
-- 会话：首次请求返回 409，读响应头 `X-Transmission-Session-Id` 后续携带（Interceptor 自动处理）
-- 列表：`torrent-get`（fields 一次拿全：属性/Tracker/文件都在同对象）
-- 全局速度：`session-stats`
-- 操作：`torrent-start` / `torrent-stop` / `torrent-start-now` / `torrent-remove`（delete-local-data）
-- 添加：`torrent-add`（filename=磁力/URL，metainfo=base64 种子文件）
-- 目录筛选 RPC 不支持服务端过滤，客户端内存过滤
+- Kotlin 2.3 + Jetpack Compose + Material3（黑白描边 monochrome 主题）
+- GeckoView 153（maven.mozilla.org，**不在 central**）
+- 纯 OkHttp + kotlinx.serialization（Transmission 单端点 RPC）
+- DataStore（配置）+ 协程 Flow；单模块 :app，minSdk 26 / compileSdk 36
+- AGP 8.7.3（受本机 AS 版本限制，force androidx.core 1.15 绕开 1.18 的 AGP 8.9 要求）
 
 ## 开发环境备忘（本机）
 
-- 项目路径：`E:\work\qb`
-- Android SDK：`E:\kaifa\huanjing\android\sdk`（compileSdk 35）
-- JDK：`E:\kaifa\huanjing\jdk\jdk\21`（JBR 21）
-- Gradle 依赖与发行版均走腾讯云镜像
+- 项目：`E:\work\qb`；Android SDK：`E:\kaifa\huanjing\android\sdk`；JDK：`E:\kaifa\huanjing\jdk\jdk\21`
+- Gradle 依赖走腾讯镜像 + maven.mozilla.org（GeckoView 专用）
 - git 身份与 SSH 密钥均为仓库级隔离（公司 GitLab 全局配置不受影响）
-- 专用 SSH key：`C:\Users\admin\.ssh\id_ed25519_ptqb`
+
+## 已知未做
+
+- 网页长按链接菜单（GeckoView 153 长按 API 待查证）
+- Gecko 深色模式跟随
+- AGP/AS 升级（升 AS 后可摘掉 force，全家桶对齐最新）
