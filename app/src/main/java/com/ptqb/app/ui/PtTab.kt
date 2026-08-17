@@ -6,6 +6,7 @@ import android.util.Base64
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,6 +70,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
+import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoView
@@ -156,10 +158,18 @@ fun PtTab(active: Boolean = true) {
     var showSiteAdd by remember { mutableStateOf(false) }
     var editSite by remember { mutableStateOf<Site?>(null) }
     var pendingLink by remember { mutableStateOf<String?>(null) }
+    var longPressLink by remember { mutableStateOf<String?>(null) }
     var session by remember { mutableStateOf<GeckoSession?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
     var pageProgress by remember { mutableStateOf<Int?>(null) }
     var search by remember { mutableStateOf("") }
+
+    // 网页深色跟随系统
+    val darkTheme = isSystemInDarkTheme()
+    LaunchedEffect(darkTheme) {
+        GeckoHolder.get(context).settings.preferredColorScheme =
+            if (darkTheme) GeckoRuntimeSettings.COLOR_SCHEME_DARK else GeckoRuntimeSettings.COLOR_SCHEME_LIGHT
+    }
 
     // 每个站点一个 GeckoSession，切站点回来原地继续
     val sessions = remember { mutableMapOf<Long, GeckoSession>() }
@@ -242,6 +252,7 @@ fun PtTab(active: Boolean = true) {
                         },
                         onHistoryChange = { canGoBack = it },
                         onLoadingChange = { pageProgress = it },
+                        onLongPressLink = { longPressLink = it },
                     )
                 }
             }
@@ -278,6 +289,31 @@ fun PtTab(active: Boolean = true) {
     if (showSiteAdd) SiteEditDialog(null, { showSiteAdd = false }, vm)
     editSite?.let { SiteEditDialog(it, { editSite = null }, vm) }
 
+    // 长按链接菜单
+    longPressLink?.let { link ->
+        AlertDialog(
+            onDismissRequest = { longPressLink = null },
+            title = { Text("链接操作") },
+            text = {
+                Text(link, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            },
+            confirmButton = {
+                Column {
+                    TextButton(onClick = {
+                        clipboard.setText(AnnotatedString(link))
+                        Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                        longPressLink = null
+                    }) { Text("复制链接") }
+                    TextButton(onClick = {
+                        pendingLink = link
+                        longPressLink = null
+                    }) { Text("转存到下载器") }
+                }
+            },
+            dismissButton = { TextButton(onClick = { longPressLink = null }) { Text("取消") } },
+        )
+    }
+
     // 转存弹窗
     pendingLink?.let { link ->
         DownloadToTrDialog(link = link, onDismiss = { pendingLink = null })
@@ -294,6 +330,7 @@ private fun GeckoWebView(
     onSessionCreated: (GeckoSession) -> Unit,
     onHistoryChange: (Boolean) -> Unit,
     onLoadingChange: (Int?) -> Unit,
+    onLongPressLink: (String) -> Unit,
 ) {
     val context = LocalContext.current
     AndroidView(
@@ -348,6 +385,17 @@ private fun GeckoWebView(
 
                 override fun onPageStop(s: GeckoSession, success: Boolean) {
                     onLoadingChange(null)
+                }
+            }
+
+            session.contentDelegate = object : GeckoSession.ContentDelegate {
+                override fun onContextMenu(
+                    s: GeckoSession,
+                    x: Int,
+                    y: Int,
+                    element: GeckoSession.ContentDelegate.ContextElement,
+                ) {
+                    element.linkUri?.let(onLongPressLink)
                 }
             }
 
